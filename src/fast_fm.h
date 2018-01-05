@@ -15,8 +15,7 @@
 #include <math.h>
 #include <stdio.h>
 #include "../externals/CXSparse/Include/cs.h"
-//#include "../externals/OpenBLAS/cblas.h"
-#include "cblas.h"
+#include "../externals/OpenBLAS/cblas.h"
 
 #include "kmath.h"
 #include "../include/ffm.h"
