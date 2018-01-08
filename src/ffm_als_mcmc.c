@@ -113,7 +113,7 @@ void sparse_fit(ffm_coef *coef, cs *X_train, cs *X_test, ffm_vector *y,
      // The rng seed needs to be different for each warm start to ensure
      // proper mixing of the mcmc chain.
      //rng= ffm_rng_seed(param.rng_seed * param.n_iter % 31);
-     rng= ffm_rng_seed(param.rng_seed * param.n_iter % 2^31); // EDIT: 2018-01-05 adrien.todeschini@gmail.com 
+     rng= ffm_rng_seed(param.rng_seed * param.n_iter % 2147483647); // EDIT: 2018-01-05 adrien.todeschini@gmail.com 
   } else {
      rng= ffm_rng_seed(param.rng_seed);
   }
