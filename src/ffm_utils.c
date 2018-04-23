@@ -278,6 +278,14 @@ double ffm_vector_sum(ffm_vector *a) {
   for (int i = 0; i < a->size; i++) tmp += a->data[i];
   return tmp;
 }
+
+double ffm_vector_sum_weighted(ffm_vector *a, ffm_vector *C) {
+  double tmp = 0;
+  for (int i = 0; i < a->size; i++) tmp += a->data[i] * C->data[i];
+  return tmp;
+}
+
+
 void ffm_vector_set(ffm_vector *a, int i, double alpha) { a->data[i] = alpha; }
 double ffm_vector_get(ffm_vector *a, int i) { return a->data[i]; }
 void ffm_vector_add_constant(ffm_vector *a, double alpha) {
@@ -657,6 +665,27 @@ double Cs_ddot(const cs *A, int col_index, double *y) {
   return sum;
 }
 
+
+double Cs_ddot_weighted(const cs *A, int col_index, double *y, ffm_vector *C) {
+  int p, j, *Ap, *Ai;
+  double *Ax;
+  if (!CS_CSC(A) || !y) return (0); /* check inputs */
+  Ap = A->p;
+  Ai = A->i;
+  Ax = A->x;
+  j = col_index;
+  double sum = 0;
+  // for (j = 0 ; j < n ; j++)
+  //{
+  for (p = Ap[j]; p < Ap[j + 1]; p++) {
+    sum += C->data[Ai[p]] * Ax[p] * y[Ai[p]];
+  }
+  // }
+  return sum;
+}
+
+
+
 /* y = alpha*A[:,j]^2+y */
 // A sparse, x, y dense
 // modification of cs_gaxpy
@@ -680,6 +709,7 @@ int Cs_scal_a2py(const cs *A, int col_index, double alpha, double *y) {
 /* y = X^2.sum(axis=0) */
 // A sparse, x, y dense
 // modification of cs_gaxpy
+
 int Cs_col_norm(const cs *A, ffm_vector *y) {
   int p, n, j, *Ap;  // *Ai ;
   double *Ax;
@@ -690,6 +720,23 @@ int Cs_col_norm(const cs *A, ffm_vector *y) {
     double norm = 0;
     for (p = Ap[j]; p < Ap[j + 1]; p++) {
       norm += Ax[p] * Ax[p];
+    }
+    ffm_vector_set(y, j, norm);
+  }
+  return (1);
+}
+
+
+int Cs_col_norm_weighted(const cs *A, ffm_vector *y, ffm_vector *C) {
+  int p, n, j, *Ap, *Ai ;
+  double *Ax;
+  if (!CS_CSC(A) || !y) return (0); /* check inputs */
+  Ap = A->p;                        /* Ai = A->i ;*/
+  n = A->n, Ax = A->x; Ai = A->i;
+  for (j = 0; j < n; j++) {
+    double norm = 0;
+    for (p = Ap[j]; p < Ap[j + 1]; p++) {
+      norm += C->data[Ai[p]] * Ax[p] * Ax[p];
     }
     ffm_vector_set(y, j, norm);
   }

@@ -769,6 +769,67 @@ void test_als_warm_start(TestFixture_T *pFix, gconstpointer pg) {
   ffm_vector_free_all(y_10_iter, y_5_plus_5_iter);
 }
 
+// test weighted ______________________________________________________________
+void test_als_weighted_warm_start(TestFixture_T *pFix, gconstpointer pg) {
+  int n_features = pFix->X->n;
+  int n_samples = pFix->X->m;
+  int k = 4;
+
+  ffm_vector *y_10_iter = ffm_vector_calloc(n_samples);
+  ffm_vector *y_15_iter = ffm_vector_calloc(n_samples);
+  ffm_vector *y_5_plus_5_iter = ffm_vector_calloc(n_samples);
+  
+  //  C
+  double data[n_samples];
+  
+  for ( int i = 0; i < n_samples; i++ ) {
+     data[ i ] = 1; 
+  }
+  
+  ffm_vector *C = ffm_vector_calloc(n_samples);
+  C->size = n_samples;
+  C->data = data;
+  C->owner = 0;
+  
+
+  ffm_param param = {.warm_start = false,
+                     .init_sigma = 0.1,
+                     .SOLVER = SOLVER_ALS,
+                     .TASK = TASK_REGRESSION,
+                     .rng_seed = 123};
+
+  param.n_iter = 10;
+  ffm_coef *coef = alloc_fm_coef(n_features, k, false);
+  sparse_fit_weighted(coef, pFix->X, NULL, pFix->y, NULL, param, C);
+  sparse_predict(coef, pFix->X, y_10_iter);
+
+  param.n_iter = 15;
+  sparse_fit_weighted(coef, pFix->X, NULL, pFix->y, NULL, param, C);
+  sparse_predict(coef, pFix->X, y_15_iter);
+
+  param.n_iter = 5;
+  sparse_fit_weighted(coef, pFix->X, NULL, pFix->y, NULL, param, C);
+  param.warm_start = true;
+  sparse_fit_weighted(coef, pFix->X, NULL, pFix->y, NULL, param, C);
+  sparse_predict(coef, pFix->X, y_5_plus_5_iter);
+
+  // check that the results are equal
+  double mse = ffm_vector_mean_squared_error(y_10_iter, y_5_plus_5_iter);
+  double mse_diff = ffm_vector_mean_squared_error(y_15_iter, y_5_plus_5_iter);
+
+
+  g_assert_cmpfloat(mse, <=, 1e-8);
+  g_assert_cmpfloat(mse, <, mse_diff);
+
+  free_ffm_coef(coef);
+  ffm_vector_free_all(y_10_iter, y_5_plus_5_iter);
+}
+
+// ____________________________________________________________________________
+
+
+
+
 void test_mcmc_warm_start(TestFixture_T *pFix, gconstpointer pg) {
   int n_features = pFix->X->n;
   int n_samples = pFix->X->m;
@@ -904,6 +965,10 @@ int main(int argc, char **argv) {
 
   g_test_add("/als/warm_start", TestFixture_T, &Fixture,
              TestFixtureContructorSimple, test_als_warm_start,
+             TestFixtureDestructor);
+             
+  g_test_add("/als_weighted/warm_start", TestFixture_T, &Fixture,
+             TestFixtureContructorSimple, test_als_weighted_warm_start,
              TestFixtureDestructor);
 
   g_test_add("/mcmc/warm_start", TestFixture_T, &Fixture,

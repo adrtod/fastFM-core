@@ -25,6 +25,7 @@ int ffm_vector_sub(ffm_vector *a, ffm_vector const *b);
 int ffm_vector_scale(ffm_vector *a, double b);
 int ffm_vector_mul(ffm_vector *a, ffm_vector const *b);
 double ffm_vector_sum(ffm_vector *a);
+double ffm_vector_sum_weighted(ffm_vector *a, ffm_vector *C);
 void ffm_vector_set_all(ffm_vector *a, double b);
 void ffm_vector_set(ffm_vector *a, int i, double alpha);
 double ffm_vector_get(ffm_vector *a, int i);
@@ -95,7 +96,11 @@ int Cs_scal_a2py(const cs *A, int col_index, double alpha, double *y);
 /* y = X^2.sum(axis=0) */
 int Cs_col_norm(const cs *A, ffm_vector *y);
 
+int Cs_col_norm_weighted(const cs *A, ffm_vector *y, ffm_vector *C);
+
 /* y = <A[:,j],y> */
 double Cs_ddot(const cs *A, int col_index, double *y);
+
+double Cs_ddot_weighted(const cs *A, int col_index, double *y, ffm_vector *C);
 
 #endif /* FFM_UTILS_H */

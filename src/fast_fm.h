@@ -70,6 +70,9 @@ typedef struct fm_data {
 
 void sparse_fit(ffm_coef *coef, cs *X, cs *X_test, ffm_vector *y,
                 ffm_vector *y_pred, ffm_param param);
+                
+void sparse_fit_weighted(ffm_coef *coef, cs *X, cs *X_test, ffm_vector *y,
+                ffm_vector *y_pred, ffm_param param, ffm_vector *C);
 
 void sparse_predict(ffm_coef *coef, cs *X, ffm_vector *y_pred);
 

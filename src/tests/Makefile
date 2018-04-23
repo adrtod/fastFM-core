@@ -37,3 +37,11 @@ TestFixtures.o : TestFixtures.h
 clean : 
 	rm -f $(P) $(OBJECTS)
 	rm -f *.o
+
+##### TEMPORARY #################
+_Test_Phi.o: _Test_Phi.c 
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ -c $<
+
+test_phi : _Test_Phi.o
+	$(CC) -o test_phi _Test_Phi.o kmath.o ../ffm_random.o ffm_utils.o ffm_als_mcmc.o TestFixtures.o $(LDLIBS)
+

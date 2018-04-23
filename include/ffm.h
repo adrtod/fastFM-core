@@ -36,6 +36,10 @@ void ffm_predict(double *w_0, double *w, double *V, cs *X, double *y_pred,
 
 void ffm_als_fit(double *w_0, double *w, double *V, cs *X, double *y,
                  ffm_param *param);
+      
+// ffm_als_fit_weighted ___________________________________________________DONE                 
+void ffm_als_fit_weighted(double *w_0, double *w, double *V, cs *X, double *y,
+                 ffm_param *param, double *C);
 
 void ffm_mcmc_fit_predict(double *w_0, double *w, double *V, cs *X_train,
                           cs *X_test, double *y_train, double *y_pred,

@@ -36,7 +36,7 @@ void col_predict(ffm_coef *coef, cs *A, ffm_vector *y_pred) {
     ffm_vector_set_all(tmp, 0);
     // over all cols
     for (j = 0; j < n; j++) {
-      // all nz in this column
+      // all nz in this column: nz = non zero element
       // Ai[p] is the (row) position in the original matrix
       // Ax[p] is the value at position Ai[p]
       for (p = Ap[j]; p < Ap[j + 1]; p++) {
@@ -153,13 +153,14 @@ void sparse_fit(ffm_coef *coef, cs *X_train, cs *X_test, ffm_vector *y,
     if (!param.warm_start) ffm_vector_set_all(y_pred_test, 0);
   }
 
+  // Iterate on the number of iteration________________________________________
   int n;
   for (n = param.iter_count; n < n_iter; n++) {
     if (param.SOLVER == SOLVER_MCMC) sample_hyper_parameter(coef, err, rng);
 
     double tmp_sigma2 = 0;
     double tmp_mu = 0;
-    // learn bias
+    // W_0 __ learn bias ______________________________________________________
     if (!param.ignore_w_0) {
       double w_0_old = coef->w_0;
       if (param.SOLVER == SOLVER_MCMC) {
@@ -171,10 +172,10 @@ void sparse_fit(ffm_coef *coef, cs *X_train, cs *X_test, ffm_vector *y,
       } else
         *w_0 = (-ffm_vector_sum(err) + *w_0 * n_samples) / ((double)n_samples);
       assert(isfinite(*w_0) && "w_0 not finite");
-      ffm_vector_add_constant(err, +(*w_0 - w_0_old));  // update error
+      ffm_vector_add_constant(err, +(*w_0 - w_0_old));  // update error 
     }
 
-    // first order interactions
+    // W_1 -> W_n __ first order interactions _________________________________
     if (!param.ignore_w)
       for (int f = 0; f < n_features; f++) {
         double w_f = ffm_vector_get(w, f);
@@ -196,7 +197,7 @@ void sparse_fit(ffm_coef *coef, cs *X_train, cs *X_test, ffm_vector *y,
                     err->data);  // update error
       }
 
-    // second order interactions
+    // V __ 2nd order interactions ____________________________________________
     if (k > 0) {
       for (int f = 0; f < k; f++) {
         // XV_f = X.dot(V[:,f])
@@ -268,6 +269,215 @@ void sparse_fit(ffm_coef *coef, cs *X_train, cs *X_test, ffm_vector *y,
   ffm_vector_free_all(column_norms, err, a_theta_v, XV_f, V_f);
   ffm_rng_free(rng);
 }
+
+
+
+// ____________________________________________________________________________
+// ____________________________________________________________________________
+// _____________________________Sparse_fit_weighted____________________________
+// ____________________________________________________________________________
+// ____________________________________________________________________________
+
+
+void sparse_v_lf_frac_weighted(double *sum_denominator, double *sum_nominator, cs *A,
+                      int col_index, ffm_vector *err, ffm_vector *cache,
+                      ffm_vector *a_theta_v, double v_lf, ffm_vector *C);
+
+
+
+
+
+void sparse_fit_weighted(ffm_coef *coef, cs *X_train, cs *X_test, ffm_vector *y,
+                ffm_vector *y_pred_test, ffm_param param, ffm_vector *C) {
+  int n_features = X_train->n;
+  int n_samples = X_train->m;
+  int k = coef->V ? coef->V->size0 : 0;
+  int n_iter = param.n_iter;
+  ffm_vector *w = coef->w;
+  ffm_matrix *V = coef->V;
+  double *w_0 = &coef->w_0;
+
+  ffm_rng *rng;
+  if (param.warm_start) {
+     // The rng seed needs to be different for each warm start to ensure
+     // proper mixing of the mcmc chain.
+     //rng= ffm_rng_seed(param.rng_seed * param.n_iter % 31);
+     rng= ffm_rng_seed(param.rng_seed * param.n_iter % 2147483647); // EDIT: 2018-01-05 adrien.todeschini@gmail.com 
+  } else {
+     rng= ffm_rng_seed(param.rng_seed);
+  }
+
+  if (!param.warm_start) init_ffm_coef(coef, param);
+
+  // init err = predict - y
+  ffm_vector *err = ffm_vector_alloc(n_samples);
+  sparse_predict(coef, X_train, err);
+
+  ffm_vector *z_target = NULL;
+  if (param.TASK == TASK_CLASSIFICATION) {
+    z_target = ffm_vector_calloc(n_samples);
+
+    // ffm_vector_normal_cdf(err);
+
+    if (param.SOLVER == SOLVER_MCMC)
+      sample_target(rng, z_target, z_target, y);
+    else
+      map_update_target(z_target, z_target, y);
+
+    // update class err
+    ffm_blas_daxpy(-1, z_target, err);
+  } else
+    ffm_blas_daxpy(-1, y, err);
+
+  // allocate memory for caches
+  ffm_vector *column_norms = ffm_vector_alloc(n_features);
+  // TODO-Phiiiiiiiiiiii_______ffm_utils.c_________________________________DONE
+  Cs_col_norm_weighted(X_train, column_norms, C);
+  ffm_vector *a_theta_v = ffm_vector_calloc(n_samples);
+  ffm_vector *XV_f = ffm_vector_calloc(n_samples);
+  ffm_vector *V_f = ffm_vector_calloc(n_features);
+  // caches that are not always needed
+  ffm_vector *tmp_predict_test = NULL;
+  if (param.SOLVER == SOLVER_MCMC) {
+    tmp_predict_test = ffm_vector_calloc(y_pred_test->size);
+    if (!param.warm_start) ffm_vector_set_all(y_pred_test, 0);
+  }
+
+  // Iterate on the number of iteration________________________________________
+  int n;
+  for (n = param.iter_count; n < n_iter; n++) {
+    if (param.SOLVER == SOLVER_MCMC) sample_hyper_parameter(coef, err, rng);
+
+    double tmp_sigma2 = 0;
+    double tmp_mu = 0;
+    // W_0 __ learn bias ______________________________________________________
+    if (!param.ignore_w_0) {
+      double w_0_old = coef->w_0;
+      if (param.SOLVER == SOLVER_MCMC) {
+        double tmp_sigma2 = 1. / (coef->alpha * n_samples);
+        double tmp_mu =
+            tmp_sigma2 *
+            (coef->alpha * (-ffm_vector_sum(err) + *w_0 * n_samples));
+        *w_0 = ffm_rand_normal(rng, tmp_mu, sqrt(tmp_sigma2));
+      } else
+      
+        // TODO-Phiiiiiiiiiiiii__________ffm_utils.c_______________________DONE
+        *w_0 = (-ffm_vector_sum_weighted(err, C) + *w_0 * ffm_vector_sum(C)) / ((double)ffm_vector_sum(C));
+        
+      assert(isfinite(*w_0) && "w_0 not finite");
+      ffm_vector_add_constant(err, +(*w_0 - w_0_old));  // update error 
+    }
+
+    // W_1 -> W_n __ first order interactions _________________________________
+    if (!param.ignore_w)
+      for (int f = 0; f < n_features; f++) {
+        double w_f = ffm_vector_get(w, f);
+        // w[f] = (err.dot(X_f) + w[f] * norm_rows_X[f]) / (norm_rows_X[f] +
+        // lambda_)
+        // TODO-Phiiiiiiiiiiiii_________ffm_utils.c________________________DONE
+        double tmp = Cs_ddot_weighted(X_train, f, err->data, C);
+        double c_norm = ffm_vector_get(column_norms, f);
+        double new_w = 0;
+        if (param.SOLVER == SOLVER_MCMC) {
+          tmp_sigma2 = 1. / (coef->alpha * c_norm + coef->lambda_w);
+          tmp_mu = tmp_sigma2 * (coef->alpha * (w_f * c_norm - tmp) +
+                                 coef->mu_w * coef->lambda_w);
+          new_w = ffm_rand_normal(rng, tmp_mu, sqrt(tmp_sigma2));
+        } else
+          new_w = (-tmp + w_f * c_norm) / (c_norm + coef->lambda_w);
+        assert(isfinite(new_w) && "w not finite");
+        ffm_vector_set(w, f, new_w);
+        Cs_scal_apy(X_train, f, ffm_vector_get(w, f) - w_f, err->data);  // update error
+      }
+
+    // V __ 2nd order interactions ____________________________________________
+    if (k > 0) {
+      for (int f = 0; f < k; f++) {
+        // XV_f = X.dot(V[:,f])
+        ffm_vector_set_all(XV_f, 0);
+        // ffm_matrix_get_row(V_f, V, f);
+        // cs_gaxpy(X_train, V_f->data, XV_f->data);
+        double *V_f_ptr = ffm_matrix_get_row_ptr(V, f);
+        // cache
+        cs_gaxpy(X_train, V_f_ptr, XV_f->data);
+        double lambda_V_k = ffm_vector_get(coef->lambda_V, f);
+        double mu_V_k = ffm_vector_get(coef->mu_V, f);
+
+        for (int l = 0; l < n_features; l++) {
+          double V_fl = ffm_matrix_get(V, f, l);
+          double sum_denominator, sum_nominator;
+          sum_nominator = sum_denominator = 0;
+          // TODO-Phiiiiiiiiiiiii________ffm_als_mcmc.c____________________DONE
+          sparse_v_lf_frac_weighted(&sum_denominator, &sum_nominator, X_train, l, err,
+                           XV_f, a_theta_v, V_fl, C);
+          double new_V_fl = 0;
+          if (param.SOLVER == SOLVER_MCMC) {
+            tmp_sigma2 = 1. / (coef->alpha * sum_denominator + lambda_V_k);
+            tmp_mu = tmp_sigma2 *
+                     (coef->alpha * sum_nominator + mu_V_k * lambda_V_k);
+            new_V_fl = ffm_rand_normal(rng, tmp_mu, sqrt(tmp_sigma2));
+          } else
+            new_V_fl = sum_nominator / (sum_denominator + lambda_V_k);
+          assert(isfinite(new_V_fl) && "V not finite");
+          ffm_matrix_set(V, f, l, new_V_fl);
+          // err = err - a_theta * (V[l, f] - V_fl) # update residual
+          update_second_order_error(l, X_train, a_theta_v, new_V_fl - V_fl,
+                                    err);
+          // update cache
+          // y = alpha*A[:,j]*x+y 
+          Cs_scal_apy(X_train, l, new_V_fl - V_fl, XV_f->data);
+        }
+      }
+    }
+
+    // recalculate error in order to stop error amplification
+    // from numerical inexact error and cache updates
+
+    sparse_predict(coef, X_train, err);
+    if (param.TASK == TASK_CLASSIFICATION) {
+      // printf("pred\n");
+      // ffm_vector_printf(err);
+      // approximate target
+      if (param.SOLVER == SOLVER_MCMC)
+        sample_target(rng, err, z_target, y);
+      else
+        map_update_target(err, z_target, y);
+      // ffm_vector_normal_cdf(err);
+      ffm_blas_daxpy(-1, z_target, err);
+      // printf("z_target\n");
+      // ffm_vector_printf(z_target);
+    } else
+      ffm_blas_daxpy(-1, y, err);
+
+    // save test predictions for posterior mean
+    if (param.SOLVER == SOLVER_MCMC) {
+      sparse_predict(coef, X_test, tmp_predict_test);
+
+      if (param.TASK == TASK_CLASSIFICATION)
+        ffm_vector_normal_cdf(tmp_predict_test);
+      ffm_vector_update_mean(y_pred_test, n, tmp_predict_test);
+    }
+  }
+  if (param.TASK == TASK_CLASSIFICATION) ffm_vector_free(z_target);
+  param.iter_count = n;  // TODO this gets lost when returning param
+  ffm_vector_free_all(column_norms, err, a_theta_v, XV_f, V_f);
+  ffm_rng_free(rng);
+}
+
+
+
+
+
+// ____________________________________________________________________________
+// ____________________________________________________________________________
+// ____________________________________________________________________________
+// ____________________________________________________________________________
+
+
+
+
+
+
 
 void sample_target(ffm_rng *rng, ffm_vector *y_pred, ffm_vector *z_target,
                    ffm_vector *y_true) {
@@ -392,3 +602,38 @@ void sparse_v_lf_frac(double *sum_denominator, double *sum_nominator, cs *A,
   }
   // }
 }
+
+
+
+
+void sparse_v_lf_frac_weighted(double *sum_denominator, double *sum_nominator, cs *A,
+                      int col_index, ffm_vector *err, ffm_vector *cache,
+                      ffm_vector *a_theta_v, double v_lf, ffm_vector *C) {
+  int p, j, *Ap, *Ai;
+  double *Ax;
+  // if (!CS_CSC (A)) return (0) ;       /* check inputs */
+  Ap = A->p;
+  Ai = A->i;
+  Ax = A->x;
+  j = col_index;
+  // for (j = 0 ; j < n ; j++)
+  //{
+  for (p = Ap[j]; p < Ap[j + 1]; p++) {
+    double A_jp = Ax[p];
+    double a_theta = A_jp * cache->data[Ai[p]] - (v_lf * A_jp * A_jp);
+    a_theta_v->data[Ai[p]] = a_theta;
+    *sum_denominator += a_theta * a_theta * C->data[Ai[p]];
+    *sum_nominator += (v_lf * a_theta - err->data[Ai[p]]) * a_theta * C->data[Ai[p]];
+  }
+  // }
+}
+
+
+
+
+
+
+
+
+
+

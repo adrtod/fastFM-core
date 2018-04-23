@@ -19,6 +19,7 @@ void ffm_predict(double *w_0, double *w, double *V, cs *X, double *y_pred,
   sparse_predict(&coef, X, &ffm_y_pred);
 }
 
+// ALS ------------------------------------------------------------------------
 void ffm_als_fit(double *w_0, double *w, double *V, cs *X, double *y,
                  ffm_param *param) {
   param->SOLVER = SOLVER_ALS;
@@ -48,6 +49,44 @@ void ffm_als_fit(double *w_0, double *w, double *V, cs *X, double *y,
   if (param->k > 0) ffm_vector_free_all(coef.lambda_V, coef.mu_V);
 }
 
+
+// ALS weighted ___________________________________________________________DONE
+void ffm_als_fit_weighted(double *w_0, double *w, double *V, cs *X, double *y,
+                 ffm_param *param, double *C) {
+  param->SOLVER = SOLVER_ALS;
+  int n_samples = X->m;
+  int n_features = X->n;
+
+  ffm_vector ffm_w = {.size = n_features, .data = w, .owner = 0};
+  ffm_matrix ffm_V = {
+      .size0 = param->k, .size1 = n_features, .data = V, .owner = 0};
+  ffm_coef coef = {
+      .w_0 = *w_0, .w = &ffm_w, .V = &ffm_V, .lambda_w = param->init_lambda_w};
+  if (param->k > 0) {
+    coef.lambda_V = ffm_vector_alloc(param->k);
+    coef.mu_V = ffm_vector_alloc(param->k);
+    ffm_vector_set_all(coef.lambda_V, param->init_lambda_V);
+  } else {
+    coef.lambda_V = NULL;
+    coef.mu_V = NULL;
+  }
+
+  ffm_vector ffm_y = {.size = n_samples, .data = y, .owner = 0};
+  ffm_vector ffm_C = {.size = n_samples, .data = C, .owner = 0};
+  
+  sparse_fit_weighted(&coef, X, NULL, &ffm_y, NULL, *param, &ffm_C);
+
+  // copy the last coef values back into the python memory
+  *w_0 = coef.w_0;
+
+  if (param->k > 0) ffm_vector_free_all(coef.lambda_V, coef.mu_V);
+}
+
+
+
+
+
+// MCMC -----------------------------------------------------------------------
 void ffm_mcmc_fit_predict(double *w_0, double *w, double *V, cs *X_train,
                           cs *X_test, double *y_train, double *y_pred,
                           ffm_param *param) {
