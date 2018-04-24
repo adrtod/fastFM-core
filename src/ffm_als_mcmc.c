@@ -346,7 +346,9 @@ void sparse_fit_weighted(ffm_coef *coef, cs *X_train, cs *X_test, ffm_vector *y,
   // Iterate on the number of iteration________________________________________
   int n;
   for (n = param.iter_count; n < n_iter; n++) {
-    if (param.SOLVER == SOLVER_MCMC) sample_hyper_parameter(coef, err, rng);
+  
+    // sample_hyper_parameter__________ ffm_als_mcmc.c ____________________DONE
+    if (param.SOLVER == SOLVER_MCMC) sample_hyper_parameter_weighted(coef, err, rng, C);
 
     double tmp_sigma2 = 0;
     double tmp_mu = 0;
@@ -568,6 +570,80 @@ void sample_hyper_parameter(ffm_coef *coef, ffm_vector *err, ffm_rng *rng) {
                    ffm_rand_normal(rng, mu_mu_v, sqrt(sigma2_mu_v)));
   }
 }
+
+
+void sample_hyper_parameter_weighted(ffm_coef *coef, ffm_vector *err, ffm_rng *rng, ffm_vector *C) {
+  int n_features = coef->w->size;
+  int n_samples = err->size;
+  int k = coef->V ? coef->V->size0 : 0;
+
+  /*
+  printf("alpah%f, lambda_w%f, mu_w%f",
+          coef->alpha, coef->lambda_w, coef->mu_w);
+  if (k> 0)
+  {
+      ffm_vector_printf(coef->mu_V);
+      ffm_vector_printf(coef->lambda_V);
+  }
+  */
+
+  ffm_vector *w = coef->w;
+  ffm_matrix *V = coef->V;
+
+  // sample alpha
+  double alpha_n = .5 * (1. + n_samples);
+  
+  // use err_weighted instead of err
+  // double l2_norm = ffm_blas_dnrm2(err);
+  ffm_vector *err_weighted = ffm_vector_alloc(n_samples);
+  for(int i = 0; i < n_samples; i++){
+    err_weighted->data[i] = sqrt(C->data[i]) * err->data[i] ;
+  }
+  double l2_norm = ffm_blas_dnrm2(err_weighted);
+  ffm_vector_free (err_weighted);
+  
+  double beta_n = .5 * (l2_norm * l2_norm + 1.);
+  coef->alpha = ffm_rand_gamma(rng, alpha_n, 1. / beta_n);
+
+  // sample lambda's
+  double alpha_w = 0.5 * (1 + n_features + 1);
+  double beta_w = 0;
+  for (int i = 0; i < n_features; i++)
+    beta_w += +ffm_pow_2(ffm_vector_get(w, i) - coef->mu_w);
+  beta_w += ffm_pow_2(coef->mu_w) + 1;
+  beta_w *= 0.5;
+  coef->lambda_w = ffm_rand_gamma(rng, alpha_w, 1. / beta_w);
+
+  double alpha_V = 0.5 * (1 + n_features + 1);
+  for (int j = 0; j < k; j++) {
+    double beta_V_fl = 0;
+    double mu_V_j = ffm_vector_get(coef->mu_V, j);
+    for (int i = 0; i < n_features; i++)
+      beta_V_fl += +ffm_pow_2(ffm_matrix_get(V, j, i) - mu_V_j);
+    beta_V_fl += ffm_pow_2(mu_V_j) + 1;
+    beta_V_fl *= 0.5;
+    ffm_vector_set(coef->lambda_V, j,
+                   ffm_rand_gamma(rng, alpha_V, 1. / beta_V_fl));
+  }
+
+  // sample mu's
+  double sigma2_mu_w = 1.0 / ((n_features + 1) * coef->lambda_w);
+  double w_sum = 0;
+  for (int i = 0; i < n_features; i++) w_sum += ffm_vector_get(w, i);
+  double mu_mu_w = w_sum / (n_features + 1);
+  coef->mu_w = ffm_rand_normal(rng, mu_mu_w, sqrt(sigma2_mu_w));
+
+  for (int j = 0; j < k; j++) {
+    double sigma2_mu_v =
+        1.0 / ((n_features + 1) * ffm_vector_get(coef->lambda_V, j));
+    double v_sum = 0;
+    for (int i = 0; i < n_features; i++) v_sum += ffm_matrix_get(V, j, i);
+    double mu_mu_v = v_sum / (n_features + 1);
+    ffm_vector_set(coef->mu_V, j,
+                   ffm_rand_normal(rng, mu_mu_v, sqrt(sigma2_mu_v)));
+  }
+}
+
 
 void update_second_order_error(int j_column, cs *A, ffm_vector *a_theta_v,
                                double delta, ffm_vector *error) {

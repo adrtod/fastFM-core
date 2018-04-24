@@ -93,6 +93,8 @@ void sparse_v_lf_frac(double *sum_denominator, double *sum_nominator, cs *A,
 
 void sample_hyper_parameter(ffm_coef *coef, ffm_vector *err, ffm_rng *rng);
 
+void sample_hyper_parameter_weighted(ffm_coef *coef, ffm_vector *err, ffm_rng *rng, ffm_vector *C);
+
 void map_update_target(ffm_vector *y_pred, ffm_vector *sample_target,
                        ffm_vector *y_train);
 

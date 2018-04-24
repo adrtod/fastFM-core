@@ -74,6 +74,7 @@ void ffm_als_fit_weighted(double *w_0, double *w, double *V, cs *X, double *y,
   ffm_vector ffm_y = {.size = n_samples, .data = y, .owner = 0};
   ffm_vector ffm_C = {.size = n_samples, .data = C, .owner = 0};
   
+  // sparse_fit_weighted __________________________________________________DONE
   sparse_fit_weighted(&coef, X, NULL, &ffm_y, NULL, *param, &ffm_C);
 
   // copy the last coef values back into the python memory
@@ -149,6 +150,77 @@ void ffm_mcmc_fit_predict(double *w_0, double *w, double *V, cs *X_train,
 
   if (k > 0) ffm_vector_free_all(coef.lambda_V, coef.mu_V);
 }
+
+
+// MCMC_weighted ----------------------------------------------------------DONE
+void ffm_mcmc_fit_predict_weighted(double *w_0, double *w, double *V, cs *X_train,
+                          cs *X_test, double *y_train, double *y_pred,
+                          ffm_param *param, double *C) {
+  param->SOLVER = SOLVER_MCMC;
+  int k = param->k;
+  double *hyper_param = param->hyper_param;
+  int n_test_samples = X_test->m;
+  int n_train_samples = X_train->m;
+  int n_features = X_train->n;
+  ffm_vector ffm_w = {.size = n_features, .data = w, .owner = 0};
+  ffm_matrix ffm_V = {
+      .size0 = param->k, .size1 = n_features, .data = V, .owner = 0};
+  ffm_coef coef = {.w_0 = *w_0,
+                   .w = &ffm_w,
+                   .V = &ffm_V,
+                   .lambda_w = param->init_lambda_w,
+                   .alpha = 1,
+                   .mu_w = 0};
+  if (k > 0) {
+    coef.lambda_V = ffm_vector_alloc(param->k);
+    coef.mu_V = ffm_vector_alloc(param->k);
+  } else {
+    coef.lambda_V = NULL;
+    coef.mu_V = NULL;
+  }
+
+  // set inital values for hyperparameter
+  int w_groups = 1;
+  assert(param->n_hyper_param == 1 + 2 * k + 2 * w_groups &&
+         "hyper_parameter vector has wrong size");
+  if (param->warm_start) {
+    coef.alpha = hyper_param[0];
+    coef.lambda_w = hyper_param[1];
+    // copy V lambda's over
+    for (int i = 0; i < k; i++)
+      ffm_vector_set(coef.lambda_V, i, hyper_param[i + 1 + w_groups]);
+    coef.mu_w = hyper_param[k + 1 + w_groups];
+    // copy V mu's over
+    for (int i = 0; i < k; i++)
+      ffm_vector_set(coef.mu_V, i, hyper_param[i + 1 + (2 * w_groups) + k]);
+  }
+
+  ffm_vector ffm_y_train = {
+      .size = n_train_samples, .data = y_train, .owner = 0};
+  ffm_vector ffm_y_pred = {.size = n_test_samples, .data = y_pred, .owner = 0};
+  
+  ffm_vector ffm_C = {.size = n_train_samples, .data = C, .owner = 0};
+  // sparse_fit_weighted __________________________________________________DONE
+  sparse_fit_weighted(&coef, X_train, X_test, &ffm_y_train, &ffm_y_pred, *param, &ffm_C);
+  
+  // copy the last coef values back into the python memory
+  *w_0 = coef.w_0;
+
+  // copy current hyperparameter back
+  hyper_param[0] = coef.alpha;
+  hyper_param[1] = coef.lambda_w;
+  // copy V lambda's back
+  for (int i = 0; i < k; i++)
+    hyper_param[i + 1 + w_groups] = ffm_vector_get(coef.lambda_V, i);
+  hyper_param[k + 1 + w_groups] = coef.mu_w;
+  // copy mu's back
+  for (int i = 0; i < k; i++)
+    hyper_param[i + 1 + (2 * w_groups) + k] = ffm_vector_get(coef.mu_V, i);
+
+  if (k > 0) ffm_vector_free_all(coef.lambda_V, coef.mu_V);
+}
+
+
 
 void ffm_sgd_bpr_fit(double *w_0, double *w, double *V, cs *X, double *pairs,
                      int n_pairs, ffm_param *param) {
